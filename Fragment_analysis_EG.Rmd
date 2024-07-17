@@ -36,6 +36,7 @@ if (!require("readxl")) install.packages("readxl")
 if (!require("shiny")) install.packages("shiny")
 
 
+
 library(tidyverse)
 library(readr)
 library(dplyr)
@@ -314,7 +315,7 @@ p3 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max",
   stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample)) 
 
 print(p3)
-ggsave(paste0(x, "barplot_Height_max_statistics.png"), plot = p3, path = "./Figures/Statistics")
+ggsave(paste0(x, "_barplot_Height_max_statistics.png"), plot = p3, path = "./Figures/Statistics")
 
 p4 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max_percentage_rep", 
        add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
