@@ -1,0 +1,345 @@
+---
+title: "CES fragment data analysis"
+author: "Eugenio Graceffo"
+date: "July 2024"
+output:
+  html_document:
+    toc: True
+    toc_float: True
+    df_print: paged
+params:
+  met_peak: 128
+  unmet_peak: 386
+  peak_tolerance: 7
+  scaling_peak: 200
+  reference_sample: 100
+---
+## 
+What is the lower limit of DNA input to be able to analyse methylation sites by fragment analysis?
+
+```{r}
+options(repos = c(CRAN = "https://cran.rstudio.com/"))  # Replace with your preferred CRAN mirror
+```
+
+
+## Package loading
+```{r pkg-load, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE, results='hide'}
+
+
+#load libraries
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("readr")) install.packages("readr")
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("ggplot2")) install.packages("ggplot2")
+if (!require("ggpubr")) install.packages("ggpubr")
+if (!require("readxl")) install.packages("readxl")
+if (!require("shiny")) install.packages("shiny")
+
+
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(readxl)
+library(shiny)
+
+
+```
+
+
+
+## Retrieve variables from bash GUI
+```{r variable-load}
+dir.create("Figures")
+dir.create("Figures/Statistics")
+
+
+
+met_peak <- params$met_peak
+unmet_peak <- params$unmet_peak
+peak_tolerance <- params$peak_tolerance
+scaling_peak <- params$scaling_peak
+reference_sample <- params$reference_sample
+```
+
+
+```{r}
+## create a vector to include the scaling peak range as a string of characters
+scaling_peak_vector <- c(as.character(scaling_peak-0.2),as.character(scaling_peak-0.2), as.character(scaling_peak-0.1), as.character(scaling_peak), as.character(scaling_peak+0.1), as.character(scaling_peak+0.2))
+
+scaling_peak_vector
+```
+
+
+
+
+
+## load peaktable output
+```{r data-load}
+PeakTable <- read_excel("PeakTable.xlsx", 
+    skip = 12)
+
+## wrangle the data
+df <- PeakTable %>%
+  filter(Dye != is.na(PeakTable$Dye)) %>%
+  filter(Sample != "Sample") %>%  ## removes lines with repeated column names
+  filter(Dye == "Blue") %>%
+  select(Sample, Size, Height, Area, Score) %>%
+  separate(Sample, into = c("V1", "Code"), sep = "_", extra = "drop", remove = FALSE) %>%
+  select(-"V1")
+
+
+
+df_scaling_factor <- PeakTable %>%
+  filter(Dye != is.na(PeakTable$Dye)) %>%
+  filter(Sample != "Sample") %>%  ## removes lines with repeated column names
+  filter(Dye == "Orange", Size %in% scaling_peak_vector) %>%
+  select(Sample, Size, Height, Area, Score) %>%
+  separate(Sample, into = c("V1", "Code"), sep = "_", extra = "drop", remove = FALSE) %>%
+  select(-"V1") %>%
+  select(-Size)
+
+df <- df %>%
+  full_join(df_scaling_factor, suffix = c("", "_scaling_value"), by=c("Sample","Code"))
+  
+
+## Adjust column types
+df$Size <- as.double(df$Size)
+df$Height <- as.double(df$Height)
+df$Area <- as.double(df$Area)
+df$Score <- as.double(df$Score)
+
+df$Height_scaling_value <- as.double(df$Height_scaling_value)
+df$Area_scaling_value <- as.double(df$Area_scaling_value)
+df$Score_scaling_value <- as.double(df$Score_scaling_value)
+
+
+PeakTable
+df
+```
+
+
+
+
+
+## Peaks calculations (+- 7bp)
+Calculate the Area Under the Curve (AUC) as the sum of peaks +- 7bp
+met -> 128 bp
+unmet -> 386 bp
+```{r peak-assign}
+## Assign peak type
+df$Peak_type <- ifelse(df$Size >(met_peak-peak_tolerance) & df$Size <(met_peak+peak_tolerance) , "met", 
+                  ifelse(df$Size >(unmet_peak-peak_tolerance) & df$Size <(unmet_peak+peak_tolerance) , "Unmet", "Other"))
+
+df <- relocate(df, "Peak_type", .after = "Size")
+
+df
+```
+Calculate normalized values of Height and AUC
+```{r normalization}
+df <- df %>%
+  mutate(Height_normalized = Height/Height_scaling_value) %>%
+  mutate(Area_normalized = Area/Area_scaling_value)
+
+df
+
+```
+
+Calculate the sum of the AUC and select the highest of the heights
+```{r AUC-sum_Height-selection}
+df <- df %>%
+  group_by(Code, Peak_type) %>%
+  mutate(AUC_sum = sum(Area_normalized)) %>%
+  mutate(Height_max = max(Height_normalized), .after = Height_normalized)
+
+```
+
+
+
+
+## load metadata
+```{r metadata-load}
+metadata <- read_excel("Metadata.xlsx")
+
+## remove blank wells
+metadata <- metadata %>%
+  filter(Replicate_name != is.na(metadata$Replicate_name))
+
+metadata
+```
+```{r data-merge}
+## merge
+df <- df %>%
+  full_join(metadata) %>%
+  relocate(c(Replicate_name, Sample_name, Condition), .after = "Code")
+
+df
+```
+
+
+
+### Calculations
+
+```{r summary-values-calculation}
+
+## separate dataframe for filtering and plotting
+df_plot <- df %>%
+  filter(Peak_type != "Other") %>%
+  select(-Size, -Height, -Area, -Score, -Height_scaling_value, -Area_scaling_value, -Score_scaling_value, -Height_normalized, -Area_normalized)%>%
+  unique()
+
+
+## calculate the percentage per each replicate
+ df_plot <- df_plot %>%
+  group_by(Code) %>%
+  mutate(AUC_sum_percentage_rep = AUC_sum / sum(AUC_sum)) %>%
+  mutate(Height_max_percentage_rep = Height_max / sum(Height_max))
+ 
+ df_plot
+
+## calculate the mean per each replicate and THEN the percentage per condition
+ df_plot_percentages_mean <- df_plot %>%
+  group_by(Sample_name, Condition, Peak_type) %>%
+  mutate(AUC_mean = mean(AUC_sum)) %>%
+  mutate(Height_max_mean = mean(Height_max)) %>%
+  select(Sample_name, Condition, Peak_type, AUC_mean, Height_max_mean) %>%
+  unique()
+
+ df_plot_percentages_mean <- df_plot_percentages_mean %>%
+  group_by(Sample_name, Condition) %>%
+  mutate(AUC_sum_percentage_average = round(AUC_mean / sum(AUC_mean), digits = 2)) %>%
+  mutate(Height_max_percentage_average = round(Height_max_mean / sum(Height_max_mean), digits = 2))
+ 
+ df_plot_percentages_mean
+ 
+ 
+ ## generate final output table
+ 
+ output_df <- df %>%
+   full_join(df_plot) %>%
+   full_join(df_plot_percentages_mean)
+ 
+ write_excel_csv(output_df, "Results.csv")
+ 
+ output_df
+```
+
+### barplots
+```{r barplots-summary}
+## mean values plotted
+ 
+ ggbarplot(df_plot_percentages_mean, "Sample_name", "AUC_mean",
+  fill = "Peak_type", color = "Peak_type", palette = "Paired") +
+    facet_wrap(~Condition)+ 
+    ylab("Area Under Curve (AUC) mean")+
+   geom_text(aes(label = AUC_sum_percentage_average))
+
+ggsave("barplot_AUC_mean.png", path = "./Figures")
+
+## percentages values plotted
+
+ ggbarplot(df_plot_percentages_mean, "Sample_name", "AUC_sum_percentage_average",
+  fill = "Peak_type", color = "Peak_type", palette = "Paired") +
+    facet_wrap(~Condition)+ 
+    ylab("Area Under Curve (AUC) in %")+
+   geom_text(aes(label = AUC_sum_percentage_average))
+ 
+ ggsave("barplot_AUC_percentage.png", path = "./Figures")
+
+
+
+
+
+ggbarplot(df_plot_percentages_mean, "Sample_name", "Height_max_mean",
+  fill = "Peak_type", color = "Peak_type", palette = "Paired") +
+    facet_wrap(~Condition)+ 
+    ylab("Max Height mean")+
+   geom_text(aes(label = Height_max_percentage_average))
+
+ggsave("barplot_Height_max_mean.png", path = "./Figures")
+
+
+ggbarplot(df_plot_percentages_mean, "Sample_name", "Height_max_percentage_average",
+  fill = "Peak_type", color = "Peak_type", palette = "Paired") +
+    facet_wrap(~Condition)+ 
+    ylab("Max Height in %")+
+   geom_text(aes(label = Height_max_percentage_average))
+
+ggsave("barplot_Height_max_percentage.png", path = "./Figures")
+
+
+
+```
+
+
+
+
+
+
+
+## statistical comparison
+```{r barplots-statistics}
+
+for (x in unique(df$Condition)) {
+  df_plot_tumor <- df_plot %>%
+  filter(Condition == x, Sample_name != 0.01)  ## remove contaminated sample 0.01 and filter for control only
+
+
+
+p1 <- ggbarplot(df_plot_tumor, "Sample_name", "AUC_sum",
+       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+    ylab("Area Under Curve (AUC)")+
+   ggtitle(paste0(x, " condition")) +
+  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample))
+
+print(p1)
+ggsave(paste0(x, "_barplot_AUC_mean_statistics.png"), plot = p1, path = "./Figures/Statistics")
+
+p2 <- ggbarplot(df_plot_tumor, "Sample_name", "AUC_sum_percentage_rep",
+       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+    ylab("Area Under Curve (AUC) in %")+
+   ggtitle(paste0(x, " condition")) +
+  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample))
+
+print(p2)
+ggsave(paste0(x, "_barplot_AUC_percentage_statistics.png"), plot = p2, path = "./Figures/Statistics")
+
+
+
+p3 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max", 
+       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+    ylab("Max Height")+
+   ggtitle(paste0(x, " condition")) +
+  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample)) 
+
+print(p3)
+ggsave(paste0(x, "barplot_Height_max_statistics.png"), plot = p3, path = "./Figures/Statistics")
+
+p4 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max_percentage_rep", 
+       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+    ylab("Max Height in %")+
+  ggtitle(paste0(x, " condition")) +
+  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample)) 
+
+print(p4)
+ggsave(paste0(x, "_barplot_Height_max_percentage_statistics.png"), plot = p3, path = "./Figures/Statistics")
+
+
+
+}
+```
+
+
+```{r sessionInfo}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
