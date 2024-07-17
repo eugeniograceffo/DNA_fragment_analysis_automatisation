@@ -1,5 +1,23 @@
 #!/bin/bash
 
+# Check if R is installed
+REQUIRED_PKG="r-essentials"
+PKG_OK=$(dpkg-query -W --showformat='${Status}\n' $REQUIRED_PKG | grep "install ok installed")
+echo Checking if $REQUIRED_PKG is installed: $PKG_OK
+if [ "" = "$PKG_OK" ]; then
+  conda install -c r $REQUIRED_PKG
+fi
+
+# Check if cmake is installed
+REQUIRED_PKG="cmake"
+PKG_OK=$(dpkg-query -W --showformat='${Status}\n' $REQUIRED_PKG | grep "install ok installed")
+echo Checking if $REQUIRED_PKG is installed: $PKG_OK
+if [ "" = "$PKG_OK" ]; then
+  conda install $REQUIRED_PKG
+fi
+
+echo "Starting R pipeline"
+
 # Prompt the user for input using Zenity
 result=$(zenity --forms --title="Input Data" --text="Enter the details of the experiment" \
     --add-entry="Methylated peak size (bp):" \
@@ -11,7 +29,7 @@ result=$(zenity --forms --title="Input Data" --text="Enter the details of the ex
 
 # Check if the user clicked "Cancel" or closed the dialog
 if [ $? -eq 1 ]; then
-    echo "User canceled."
+    echo "Pipeline was cancelled by the user."
     exit 1
 fi
 
