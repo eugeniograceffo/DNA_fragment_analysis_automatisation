@@ -1,20 +1,42 @@
 #!/bin/bash
 
-# Check if R is installed
+
+# Function to check if a package is installed in Debian
+debian_package_installed() {
+    local pkg_name="$1"
+    dpkg-query -W --showformat='${Status}\n' "$pkg_name" 2>/dev/null | grep -q "install ok installed"
+}
+
+# Function to check if a package is installed in Conda environment
+conda_package_installed() {
+    local pkg_name="$1"
+    which $pkg_name | grep -q "^$pkg_name "
+}
+
+# Function to install a package via Conda
+conda_install_package() {
+    local pkg_name="$1"
+    conda install "$pkg_name"
+}
+
+# Check if R essentials are installed (Debian or Conda)
 REQUIRED_PKG="r-essentials"
-PKG_OK=$(dpkg-query -W --showformat='${Status}\n' $REQUIRED_PKG | grep "install ok installed")
-echo Checking if $REQUIRED_PKG is installed: $PKG_OK
-if [ "" = "$PKG_OK" ]; then
-  conda install -c r $REQUIRED_PKG
+if ! debian_package_installed "$REQUIRED_PKG" && ! conda_package_installed "$REQUIRED_PKG"; then
+    echo "$REQUIRED_PKG is not installed. Installing..."
+    conda_install_package "$REQUIRED_PKG"
+else
+    echo "$REQUIRED_PKG is already installed."
 fi
 
-# Check if cmake is installed
+# Check if cmake is installed (Debian or Conda)
 REQUIRED_PKG="cmake"
-PKG_OK=$(dpkg-query -W --showformat='${Status}\n' $REQUIRED_PKG | grep "install ok installed")
-echo Checking if $REQUIRED_PKG is installed: $PKG_OK
-if [ "" = "$PKG_OK" ]; then
-  conda install $REQUIRED_PKG
+if ! debian_package_installed "$REQUIRED_PKG" && ! conda_package_installed "$REQUIRED_PKG"; then
+    echo "$REQUIRED_PKG is not installed. Installing..."
+    conda_install_package "$REQUIRED_PKG"
+else
+    echo "$REQUIRED_PKG is already installed."
 fi
+
 
 echo "Starting R pipeline"
 
@@ -53,7 +75,7 @@ Rscript -e "rmarkdown::render('Fragment_analysis_EG.Rmd', params = list(
   unmet_peak = $unmet_peak,
   peak_tolerance = $peak_tolerance,
   scaling_peak = $scaling_peak,
-  reference_sample = $reference_sample),
+  reference_sample = \"$reference_sample\"),
   output_file = 'Fragment_analysis_EG_results')"
 
 echo "Done!"
