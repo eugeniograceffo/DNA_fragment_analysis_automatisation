@@ -12,7 +12,7 @@ params:
   unmet_peak: 386
   peak_tolerance: 7
   scaling_peak: 200
-  reference_sample: 100
+  reference_sample: "M10U0"
 ---
 ## 
 What is the lower limit of DNA input to be able to analyse methylation sites by fragment analysis?
@@ -124,8 +124,8 @@ df
 
 
 
-## Peaks calculations (+- 7bp)
-Calculate the Area Under the Curve (AUC) as the sum of peaks +- 7bp
+## Peaks calculations (+- peak tollerance)
+Calculate the Area Under the Curve (AUC) as the sum of peaks +- peak tollerance 
 met -> 128 bp
 unmet -> 386 bp
 ```{r peak-assign}
@@ -188,8 +188,21 @@ df
 df_plot <- df %>%
   filter(Peak_type != "Other") %>%
   select(-Size, -Height, -Area, -Score, -Height_scaling_value, -Area_scaling_value, -Score_scaling_value, -Height_normalized, -Area_normalized)%>%
-  unique()
+  unique() %>%
+  separate(Sample, into = c("V1", "temp"), sep = "-", extra = "drop", remove = FALSE) %>%
+  separate(temp, into = c("order"), sep = "_", extra = "drop", remove = TRUE) %>%
+  select(-"V1") %>%
+  arrange(as.double(order))
+df_plot$order <- as.double(df_plot$order)
 
+
+## create a dataframe for the ordering in the figures
+order_df <- df_plot %>%
+  ungroup()%>%
+  select(order, Sample_name) %>%
+  group_by(Sample_name) %>%
+  summarise(order = mean(order)) %>%
+  unique()
 
 ## calculate the percentage per each replicate
  df_plot <- df_plot %>%
@@ -205,7 +218,9 @@ df_plot <- df %>%
   mutate(AUC_mean = mean(AUC_sum)) %>%
   mutate(Height_max_mean = mean(Height_max)) %>%
   select(Sample_name, Condition, Peak_type, AUC_mean, Height_max_mean) %>%
-  unique()
+  unique() %>%
+  left_join(order_df)%>%
+  arrange(Peak_type)
 
  df_plot_percentages_mean <- df_plot_percentages_mean %>%
   group_by(Sample_name, Condition) %>%
@@ -234,7 +249,8 @@ df_plot <- df %>%
   fill = "Peak_type", color = "Peak_type", palette = "Paired") +
     facet_wrap(~Condition)+ 
     ylab("Area Under Curve (AUC) mean")+
-   geom_text(aes(label = AUC_sum_percentage_average))
+    geom_text(aes(label = AUC_sum_percentage_average),
+              position = position_stack(vjust = 0.5))
 
 ggsave("barplot_AUC_mean.png", path = "./Figures")
 
@@ -244,7 +260,8 @@ ggsave("barplot_AUC_mean.png", path = "./Figures")
   fill = "Peak_type", color = "Peak_type", palette = "Paired") +
     facet_wrap(~Condition)+ 
     ylab("Area Under Curve (AUC) in %")+
-   geom_text(aes(label = AUC_sum_percentage_average))
+    geom_text(aes(label = AUC_sum_percentage_average),
+              position = position_stack(vjust = 0.5))
  
  ggsave("barplot_AUC_percentage.png", path = "./Figures")
 
@@ -256,16 +273,18 @@ ggbarplot(df_plot_percentages_mean, "Sample_name", "Height_max_mean",
   fill = "Peak_type", color = "Peak_type", palette = "Paired") +
     facet_wrap(~Condition)+ 
     ylab("Max Height mean")+
-   geom_text(aes(label = Height_max_percentage_average))
+    geom_text(aes(label = Height_max_percentage_average),
+              position = position_stack(vjust = 0.5))
 
 ggsave("barplot_Height_max_mean.png", path = "./Figures")
 
 
 ggbarplot(df_plot_percentages_mean, "Sample_name", "Height_max_percentage_average",
-  fill = "Peak_type", color = "Peak_type", palette = "Paired") +
+  fill = "Peak_type", color = "Peak_type", palette = "Paired", position = position_stack()) +
     facet_wrap(~Condition)+ 
     ylab("Max Height in %")+
-   geom_text(aes(label = Height_max_percentage_average))
+    geom_text(aes(label = Height_max_percentage_average),
+              position = position_stack(vjust = 0.5))
 
 ggsave("barplot_Height_max_percentage.png", path = "./Figures")
 
@@ -289,19 +308,21 @@ for (x in unique(df$Condition)) {
 
 
 p1 <- ggbarplot(df_plot_tumor, "Sample_name", "AUC_sum",
-       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+       add = c("mean_sd"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
     ylab("Area Under Curve (AUC)")+
-   ggtitle(paste0(x, " condition")) +
-  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample))
+  guides(x =  guide_axis(angle = 45)) +
+  ggtitle(paste0(x, " condition"), subtitle = "t-test") +
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample))
 
 print(p1)
 ggsave(paste0(x, "_barplot_AUC_mean_statistics.png"), plot = p1, path = "./Figures/Statistics")
 
 p2 <- ggbarplot(df_plot_tumor, "Sample_name", "AUC_sum_percentage_rep",
-       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+       add = c("mean_sd"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
     ylab("Area Under Curve (AUC) in %")+
-   ggtitle(paste0(x, " condition")) +
-  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample))
+  guides(x =  guide_axis(angle = 45)) +
+  ggtitle(paste0(x, " condition"), subtitle = "t-test") +
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample))
 
 print(p2)
 ggsave(paste0(x, "_barplot_AUC_percentage_statistics.png"), plot = p2, path = "./Figures/Statistics")
@@ -309,19 +330,21 @@ ggsave(paste0(x, "_barplot_AUC_percentage_statistics.png"), plot = p2, path = ".
 
 
 p3 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max", 
-       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+       add = c("mean_sd"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
     ylab("Max Height")+
-   ggtitle(paste0(x, " condition")) +
-  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample)) 
+  guides(x =  guide_axis(angle = 45)) +
+  ggtitle(paste0(x, " condition"), subtitle = "t-test") +
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample)) 
 
 print(p3)
 ggsave(paste0(x, "_barplot_Height_max_statistics.png"), plot = p3, path = "./Figures/Statistics")
 
 p4 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max_percentage_rep", 
-       add = c("mean_se"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
+       add = c("mean_sd"),fill = "Peak_type", color = "black", palette = "Paired", facet.by = "Peak_type") +
     ylab("Max Height in %")+
-  ggtitle(paste0(x, " condition")) +
-  stat_compare_means(label = "p.signif", ref.group = as.character(reference_sample)) 
+  guides(x =  guide_axis(angle = 45)) +
+  ggtitle(paste0(x, " condition"), subtitle = "t-test") +
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample)) 
 
 print(p4)
 ggsave(paste0(x, "_barplot_Height_max_percentage_statistics.png"), plot = p3, path = "./Figures/Statistics")
@@ -335,7 +358,6 @@ ggsave(paste0(x, "_barplot_Height_max_percentage_statistics.png"), plot = p3, pa
 ```{r sessionInfo}
 sessionInfo()
 ```
-
 
 
 
