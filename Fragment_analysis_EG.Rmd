@@ -10,12 +10,13 @@ output:
 params:
   met_peak: 128
   unmet_peak: 386
-  peak_tolerance: 7
+  peak_tolerance: 5
   scaling_peak: 200
-  reference_sample: "M10U0"
+  reference_sample: ".all."
+  sample_to_remove: "Not_set"
 ---
 ## 
-What is the lower limit of DNA input to be able to analyse methylation sites by fragment analysis?
+Data analysis of CES fragment analysis results.
 
 ```{r}
 options(repos = c(CRAN = "https://cran.rstudio.com/"))  # Replace with your preferred CRAN mirror
@@ -23,7 +24,7 @@ options(repos = c(CRAN = "https://cran.rstudio.com/"))  # Replace with your pref
 
 
 ## Package loading
-```{r pkg-load, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE, results='hide'}
+```{r pkg-load, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide'}
 
 
 #load libraries
@@ -62,6 +63,12 @@ unmet_peak <- params$unmet_peak
 peak_tolerance <- params$peak_tolerance
 scaling_peak <- params$scaling_peak
 reference_sample <- params$reference_sample
+
+print(paste0("The methylated peak size was set to ", met_peak, " bp"))
+print(paste0("The unmethylated peak size was set to ", unmet_peak, " bp"))
+print(paste0("The peak calling tollerance was set to ", peak_tolerance, " bp"))
+print(paste0("The ", scaling_peak, " bp ", "ladder peak was used for normalization"))
+
 ```
 
 
@@ -76,7 +83,7 @@ scaling_peak_vector
 
 
 
-## load peaktable output
+## Load peaktable output
 ```{r data-load}
 PeakTable <- read_excel("PeakTable.xlsx", 
     skip = 12)
@@ -124,10 +131,8 @@ df
 
 
 
-## Peaks calculations (+- peak tollerance)
-Calculate the Area Under the Curve (AUC) as the sum of peaks +- peak tollerance 
-met -> 128 bp
-unmet -> 386 bp
+## Peak assignment
+Assign the peaks (met, unmet or other) based on user input within range (peak tolerance)
 ```{r peak-assign}
 ## Assign peak type
 df$Peak_type <- ifelse(df$Size >(met_peak-peak_tolerance) & df$Size <(met_peak+peak_tolerance) , "met", 
@@ -137,7 +142,8 @@ df <- relocate(df, "Peak_type", .after = "Size")
 
 df
 ```
-Calculate normalized values of Height and AUC
+## Peaks normalization 
+Calculate normalized values of Height and AUC based on ladder peak selected by user
 ```{r normalization}
 df <- df %>%
   mutate(Height_normalized = Height/Height_scaling_value) %>%
@@ -147,6 +153,7 @@ df
 
 ```
 
+## Peaks calculation of AUC and selection of max height 
 Calculate the sum of the AUC and select the highest of the heights
 ```{r AUC-sum_Height-selection}
 df <- df %>%
@@ -159,7 +166,7 @@ df <- df %>%
 
 
 
-## load metadata
+## Load metadata
 ```{r metadata-load}
 metadata <- read_excel("Metadata.xlsx")
 
@@ -180,10 +187,9 @@ df
 
 
 
-### Calculations
+## Creation of dataframe for figures
 
-```{r summary-values-calculation}
-
+```{r figures-dataframe-generation}
 ## separate dataframe for filtering and plotting
 df_plot <- df %>%
   filter(Peak_type != "Other") %>%
@@ -203,7 +209,11 @@ order_df <- df_plot %>%
   group_by(Sample_name) %>%
   summarise(order = mean(order)) %>%
   unique()
+```
 
+
+## Calclulation of percentages
+```{r summary-values-calculation}
 ## calculate the percentage per each replicate
  df_plot <- df_plot %>%
   group_by(Code) %>%
@@ -228,20 +238,25 @@ order_df <- df_plot %>%
   mutate(Height_max_percentage_average = round(Height_max_mean / sum(Height_max_mean), digits = 2))
  
  df_plot_percentages_mean
- 
- 
- ## generate final output table
+```
+
+
+## Generation of final results.csv
+
+```{r Generation-results.csv}
+## generate final output table
  
  output_df <- df %>%
    full_join(df_plot) %>%
-   full_join(df_plot_percentages_mean)
+   full_join(df_plot_percentages_mean)%>%
+   select(-order)
  
  write_excel_csv(output_df, "Results.csv")
  
  output_df
 ```
 
-### barplots
+## Barplots
 ```{r barplots-summary}
 ## mean values plotted
  
@@ -298,12 +313,13 @@ ggsave("barplot_Height_max_percentage.png", path = "./Figures")
 
 
 
-## statistical comparison
+## Barplots statistical comparison
+The following code generates a plot of AUC, AUC %, max height and max height % of met and unmet peaks for each **condition**
 ```{r barplots-statistics}
 
 for (x in unique(df$Condition)) {
   df_plot_tumor <- df_plot %>%
-  filter(Condition == x, Sample_name != 0.01)  ## remove contaminated sample 0.01 and filter for control only
+  filter(Condition == x, Sample_name != params$sample_to_remove)  ## remove contaminated sample 0.01 and filter for control only
 
 
 
@@ -312,7 +328,7 @@ p1 <- ggbarplot(df_plot_tumor, "Sample_name", "AUC_sum",
     ylab("Area Under Curve (AUC)")+
   guides(x =  guide_axis(angle = 45)) +
   ggtitle(paste0(x, " condition"), subtitle = "t-test") +
-  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample))
+  stat_compare_means(label = "p.format", method = "t.test", ref.group = as.character(reference_sample))
 
 print(p1)
 ggsave(paste0(x, "_barplot_AUC_mean_statistics.png"), plot = p1, path = "./Figures/Statistics")
@@ -322,7 +338,7 @@ p2 <- ggbarplot(df_plot_tumor, "Sample_name", "AUC_sum_percentage_rep",
     ylab("Area Under Curve (AUC) in %")+
   guides(x =  guide_axis(angle = 45)) +
   ggtitle(paste0(x, " condition"), subtitle = "t-test") +
-  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample))
+  stat_compare_means(label = "p.format", method = "t.test", ref.group = as.character(reference_sample))
 
 print(p2)
 ggsave(paste0(x, "_barplot_AUC_percentage_statistics.png"), plot = p2, path = "./Figures/Statistics")
@@ -334,7 +350,7 @@ p3 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max",
     ylab("Max Height")+
   guides(x =  guide_axis(angle = 45)) +
   ggtitle(paste0(x, " condition"), subtitle = "t-test") +
-  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample)) 
+  stat_compare_means(label = "p.format", method = "t.test", ref.group = as.character(reference_sample)) 
 
 print(p3)
 ggsave(paste0(x, "_barplot_Height_max_statistics.png"), plot = p3, path = "./Figures/Statistics")
@@ -344,10 +360,10 @@ p4 <- ggbarplot(df_plot_tumor, "Sample_name", "Height_max_percentage_rep",
     ylab("Max Height in %")+
   guides(x =  guide_axis(angle = 45)) +
   ggtitle(paste0(x, " condition"), subtitle = "t-test") +
-  stat_compare_means(label = "p.signif", method = "t.test", ref.group = as.character(reference_sample)) 
+  stat_compare_means(label = "p.format", method = "t.test", ref.group = as.character(reference_sample)) 
 
 print(p4)
-ggsave(paste0(x, "_barplot_Height_max_percentage_statistics.png"), plot = p3, path = "./Figures/Statistics")
+ggsave(paste0(x, "_barplot_Height_max_percentage_statistics.png"), plot = p4, path = "./Figures/Statistics")
 
 
 
